@@ -184,6 +184,20 @@ export const updateFeeRule = (data) => {
   return http.post('/fee-rule', data);
 };
 
+/**
+ * 试算停车费用
+ * @param {Object} data - 试算参数
+ * @param {number} data.parking_minutes - 停车分钟数
+ * @param {number} [data.free_minutes] - 免费分钟数（可选，使用表单当前值）
+ * @param {number} [data.price_per_hour] - 每小时单价（可选）
+ * @param {number} [data.daily_cap] - 日封顶金额（可选）
+ * @param {string} [data.rounding] - 取整规则（可选）
+ * @returns {Promise}
+ */
+export const calculateFeeTrial = (data) => {
+  return http.post('/fee-rule/calculate', data);
+};
+
 // ==================== 进出场记录 API ====================
 
 /**

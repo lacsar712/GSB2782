@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { sendResponse, sendError, getClientIp } = require('../utils/helpers');
+const { calculateFee } = require('../services/feeCalculator');
 
 /**
  * 获取收费规则
@@ -77,7 +78,61 @@ async function updateFeeRule(req, res) {
   }
 }
 
+/**
+ * 试算停车费用
+ * POST /api/fee-rule/calculate
+ */
+async function calculateFeeTrial(req, res) {
+  try {
+    const { parking_minutes, free_minutes, price_per_hour, daily_cap, rounding } = req.body;
+
+    if (parking_minutes === undefined) {
+      return sendError(res, '请输入停车分钟数', 400);
+    }
+
+    let ruleFreeMinutes = free_minutes;
+    let rulePricePerHour = price_per_hour;
+    let ruleDailyCap = daily_cap;
+    let ruleRounding = rounding;
+
+    if (
+      ruleFreeMinutes === undefined ||
+      rulePricePerHour === undefined ||
+      ruleDailyCap === undefined ||
+      !ruleRounding
+    ) {
+      const [rules] = await db.query('SELECT * FROM fee_rules ORDER BY id DESC LIMIT 1');
+      if (rules.length > 0) {
+        const rule = rules[0];
+        ruleFreeMinutes = ruleFreeMinutes ?? rule.free_minutes;
+        rulePricePerHour = rulePricePerHour ?? parseFloat(rule.price_per_hour);
+        ruleDailyCap = ruleDailyCap ?? parseFloat(rule.daily_cap);
+        ruleRounding = ruleRounding ?? rule.rounding;
+      } else {
+        ruleFreeMinutes = ruleFreeMinutes ?? 15;
+        rulePricePerHour = rulePricePerHour ?? 5.0;
+        ruleDailyCap = ruleDailyCap ?? 50.0;
+        ruleRounding = ruleRounding ?? '60min_up';
+      }
+    }
+
+    const result = calculateFee({
+      parkingMinutes: parking_minutes,
+      freeMinutes: ruleFreeMinutes,
+      pricePerHour: rulePricePerHour,
+      dailyCap: ruleDailyCap,
+      rounding: ruleRounding,
+    });
+
+    sendResponse(res, 0, 'success', result);
+  } catch (error) {
+    console.error('试算费用错误:', error);
+    sendError(res, '试算失败', 500);
+  }
+}
+
 module.exports = {
   getFeeRule,
   updateFeeRule,
+  calculateFeeTrial,
 };
