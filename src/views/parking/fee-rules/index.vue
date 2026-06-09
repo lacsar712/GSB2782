@@ -18,6 +18,7 @@
               :step="5"
               placeholder="请输入免费分钟数"
               style="width: 300px"
+              @update:value="handleRuleChange"
             >
               <template #suffix>分钟</template>
             </n-input-number>
@@ -36,6 +37,7 @@
               :step="0.5"
               placeholder="请输入每小时单价"
               style="width: 300px"
+              @update:value="handleRuleChange"
             >
               <template #prefix>¥</template>
               <template #suffix>元/小时</template>
@@ -50,6 +52,7 @@
               :step="10"
               placeholder="请输入日封顶金额"
               style="width: 300px"
+              @update:value="handleRuleChange"
             >
               <template #prefix>¥</template>
               <template #suffix>元</template>
@@ -62,7 +65,7 @@
           </n-form-item>
 
           <n-form-item label="计费取整规则" path="rounding">
-            <n-radio-group v-model:value="formData.rounding">
+            <n-radio-group v-model:value="formData.rounding" @update:value="handleRuleChange">
               <n-space vertical>
                 <n-radio value="30min_up" label="30分钟进位">
                   <template #default>
@@ -90,7 +93,7 @@
 
           <n-divider />
 
-          <n-form-item label="计费示例">
+          <n-form-item label="计费试算">
             <n-card size="small" style="width: 600px">
               <n-space vertical>
                 <n-text>
@@ -110,15 +113,47 @@
                   {{ formData.rounding === '30min_up' ? '30分钟进位' : '60分钟进位' }}
                 </n-text>
                 <n-divider style="margin: 8px 0" />
-                <n-text depth="3" style="font-size: 12px">
-                  示例：停车2小时15分钟
-                  <br />
-                  - 免费时长：{{ formData.free_minutes }}分钟
-                  <br />
-                  - 计费时长：{{ Math.max(0, 135 - formData.free_minutes) }}分钟
-                  <br />
-                  - 应收费用：约 ¥{{ calculateExample() }}
-                </n-text>
+                <n-form-item label="输入停车分钟数" label-placement="left" label-width="120" style="margin-bottom: 8px">
+                  <n-input-number
+                    v-model:value="trialMinutes"
+                    :min="0"
+                    :step="15"
+                    placeholder="请输入停车分钟数"
+                    style="width: 200px"
+                    :loading="trialLoading"
+                    @update:value="handleTrialMinutesChange"
+                  >
+                    <template #suffix>分钟</template>
+                  </n-input-number>
+                </n-form-item>
+                <div v-if="trialResult !== null">
+                  <n-space vertical size="small">
+                    <n-text>
+                      <n-text strong>停车时长：</n-text>
+                      {{ trialResult.parking_minutes }} 分钟
+                    </n-text>
+                    <n-text>
+                      <n-text strong>免费时长：</n-text>
+                      {{ trialResult.free_minutes }} 分钟
+                    </n-text>
+                    <n-text>
+                      <n-text strong>计费分钟数：</n-text>
+                      {{ trialResult.chargeable_minutes }} 分钟
+                    </n-text>
+                    <n-text>
+                      <n-text strong>计费小时数：</n-text>
+                      {{ trialResult.billable_hours }} 小时
+                    </n-text>
+                    <n-divider style="margin: 4px 0" />
+                    <n-text style="font-size: 18px">
+                      <n-text strong type="success">应收费用：</n-text>
+                      <n-text type="success" strong style="font-size: 22px">¥{{ trialResult.fee.toFixed(2) }}</n-text>
+                    </n-text>
+                    <n-text v-if="trialMinutes <= formData.free_minutes" depth="3" style="font-size: 12px">
+                      当前停车时长未超过免费分钟数，所以应收费用为 0
+                    </n-text>
+                  </n-space>
+                </div>
               </n-space>
             </n-card>
           </n-form-item>
@@ -138,16 +173,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useMessage } from 'naive-ui';
-import { getFeeRule, updateFeeRule } from '@/api/http.js';
+import { getFeeRule, updateFeeRule, calculateFeeTrial } from '@/api/http.js';
 
 const message = useMessage();
 const formRef = ref();
 const loading = ref(false);
 const saving = ref(false);
+const trialLoading = ref(false);
+const trialMinutes = ref<number | null>(135);
+const trialResult = ref<{
+  parking_minutes: number;
+  free_minutes: number;
+  chargeable_minutes: number;
+  billable_hours: number;
+  fee: number;
+} | null>(null);
 
-// 表单数据
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 const formData = ref({
   free_minutes: 15,
   price_per_hour: 5.0,
@@ -155,10 +200,8 @@ const formData = ref({
   rounding: '60min_up',
 });
 
-// 保存初始数据用于重置
 const initialData = ref({});
 
-// 表单验证规则
 const rules = {
   free_minutes: {
     required: true,
@@ -185,33 +228,48 @@ const rules = {
   },
 };
 
-// 计算示例费用
-const calculateExample = () => {
-  const totalMinutes = 135; // 2小时15分钟
-  const chargeableMinutes = Math.max(0, totalMinutes - formData.value.free_minutes);
-
-  if (chargeableMinutes === 0) return 0;
-
-  let hours = 0;
-  if (formData.value.rounding === '30min_up') {
-    // 30分钟进位
-    hours = Math.ceil(chargeableMinutes / 30) * 0.5;
-  } else {
-    // 60分钟进位
-    hours = Math.ceil(chargeableMinutes / 60);
+const doCalculate = async () => {
+  if (trialMinutes.value === null || trialMinutes.value < 0) {
+    trialResult.value = null;
+    return;
   }
 
-  let fee = hours * formData.value.price_per_hour;
-
-  // 日封顶
-  if (formData.value.daily_cap > 0) {
-    fee = Math.min(fee, formData.value.daily_cap);
+  trialLoading.value = true;
+  try {
+    const res = await calculateFeeTrial({
+      parking_minutes: trialMinutes.value,
+      free_minutes: formData.value.free_minutes,
+      price_per_hour: formData.value.price_per_hour,
+      daily_cap: formData.value.daily_cap,
+      rounding: formData.value.rounding,
+    });
+    if (res && res.data) {
+      trialResult.value = res.data;
+    }
+  } catch (error) {
+    console.error('试算失败:', error);
+  } finally {
+    trialLoading.value = false;
   }
-
-  return fee.toFixed(2);
 };
 
-// 加载收费规则
+const debouncedCalculate = () => {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+  }
+  debounceTimer = setTimeout(() => {
+    doCalculate();
+  }, 300);
+};
+
+const handleTrialMinutesChange = () => {
+  debouncedCalculate();
+};
+
+const handleRuleChange = () => {
+  debouncedCalculate();
+};
+
 const loadFeeRule = async () => {
   loading.value = true;
   try {
@@ -221,8 +279,8 @@ const loadFeeRule = async () => {
         ...formData.value,
         ...res.data,
       };
-      // 保存初始数据
       initialData.value = JSON.parse(JSON.stringify(formData.value));
+      debouncedCalculate();
     }
   } catch (error) {
     message.error('加载收费规则失败');
@@ -231,7 +289,6 @@ const loadFeeRule = async () => {
   }
 };
 
-// 保存收费规则
 const handleSave = async () => {
   try {
     await formRef.value?.validate();
@@ -240,7 +297,6 @@ const handleSave = async () => {
     const res = await updateFeeRule(formData.value);
     if (res) {
       message.success('保存成功');
-      // 更新初始数据
       initialData.value = JSON.parse(JSON.stringify(formData.value));
     }
   } catch (error) {
@@ -254,10 +310,10 @@ const handleSave = async () => {
   }
 };
 
-// 重置表单
 const handleReset = () => {
   formData.value = JSON.parse(JSON.stringify(initialData.value));
   message.info('已重置为上次保存的数据');
+  debouncedCalculate();
 };
 
 onMounted(() => {
