@@ -119,6 +119,43 @@
                   <br />
                   - 应收费用：约 ¥{{ calculateExample() }}
                 </n-text>
+                <n-divider style="margin: 8px 0" />
+                <n-text strong>费用试算</n-text>
+                <n-space align="center">
+                  <n-text>停车时长</n-text>
+                  <n-input-number
+                    v-model:value="trialMinutes"
+                    :min="0"
+                    :max="1440"
+                    :step="15"
+                    placeholder="输入分钟数"
+                    style="width: 160px"
+                    @update:value="handleTrialChange"
+                  >
+                    <template #suffix>分钟</template>
+                  </n-input-number>
+                </n-space>
+                <n-spin :show="trialLoading" size="small">
+                  <n-space vertical v-if="trialResult !== null">
+                    <n-text>
+                      <n-text strong>免费时长：</n-text>
+                      {{ trialResult.free_minutes }} 分钟
+                    </n-text>
+                    <n-text>
+                      <n-text strong>计费时长：</n-text>
+                      {{ trialResult.chargeable_minutes }} 分钟
+                    </n-text>
+                    <n-text>
+                      <n-text strong>应收费用：</n-text>
+                      <n-text type="error" style="font-size: 18px; font-weight: bold">
+                        ¥{{ trialResult.fee.toFixed(2) }}
+                      </n-text>
+                    </n-text>
+                  </n-space>
+                  <n-text v-else depth="3" style="font-size: 12px">
+                    请输入停车分钟数进行试算
+                  </n-text>
+                </n-spin>
               </n-space>
             </n-card>
           </n-form-item>
@@ -140,12 +177,17 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useMessage } from 'naive-ui';
-import { getFeeRule, updateFeeRule } from '@/api/http.js';
+import { getFeeRule, updateFeeRule, calculateFeePreview } from '@/api/http.js';
 
 const message = useMessage();
 const formRef = ref();
 const loading = ref(false);
 const saving = ref(false);
+
+const trialMinutes = ref(null);
+const trialResult = ref(null);
+const trialLoading = ref(false);
+let trialTimer = null;
 
 // 表单数据
 const formData = ref({
@@ -258,6 +300,37 @@ const handleSave = async () => {
 const handleReset = () => {
   formData.value = JSON.parse(JSON.stringify(initialData.value));
   message.info('已重置为上次保存的数据');
+};
+
+const handleTrialChange = () => {
+  if (trialTimer) clearTimeout(trialTimer);
+  trialTimer = setTimeout(() => {
+    doTrial();
+  }, 400);
+};
+
+const doTrial = async () => {
+  if (trialMinutes.value === null || trialMinutes.value === undefined) {
+    trialResult.value = null;
+    return;
+  }
+  trialLoading.value = true;
+  try {
+    const res = await calculateFeePreview({
+      total_minutes: trialMinutes.value,
+      free_minutes: formData.value.free_minutes,
+      price_per_hour: formData.value.price_per_hour,
+      daily_cap: formData.value.daily_cap,
+      rounding: formData.value.rounding,
+    });
+    if (res && res.data) {
+      trialResult.value = res.data;
+    }
+  } catch (error) {
+    message.error('试算请求失败');
+  } finally {
+    trialLoading.value = false;
+  }
 };
 
 onMounted(() => {
