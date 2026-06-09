@@ -184,6 +184,15 @@ export const updateFeeRule = (data) => {
   return http.post('/fee-rule', data);
 };
 
+/**
+ * 试算停车费用
+ * @param {Object} data - 包含收费规则和停车分钟数
+ * @returns {Promise}
+ */
+export const calculateParkingFee = (data) => {
+  return http.post('/fee-rule/calculate', data);
+};
+
 // ==================== 进出场记录 API ====================
 
 /**
