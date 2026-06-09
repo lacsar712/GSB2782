@@ -23,6 +23,7 @@ router.post('/settings', settingsController.updateSettings);
 // 收费规则
 router.get('/fee-rule', feeRuleController.getFeeRule);
 router.post('/fee-rule', feeRuleController.updateFeeRule);
+router.post('/fee-rule/estimate', feeRuleController.estimateFee);
 
 // 进出场记录
 router.get('/parking-records', parkingRecordsController.getParkingRecords);

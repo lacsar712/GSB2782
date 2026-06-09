@@ -110,14 +110,27 @@
                   {{ formData.rounding === '30min_up' ? '30分钟进位' : '60分钟进位' }}
                 </n-text>
                 <n-divider style="margin: 8px 0" />
+                <n-space align="center">
+                  <n-text strong>试算停车时长：</n-text>
+                  <n-input-number
+                    v-model:value="estimateMinutes"
+                    :min="0"
+                    :step="5"
+                    placeholder="请输入停车分钟数"
+                    style="width: 200px"
+                  >
+                    <template #suffix>分钟</template>
+                  </n-input-number>
+                </n-space>
                 <n-text depth="3" style="font-size: 12px">
-                  示例：停车2小时15分钟
-                  <br />
                   - 免费时长：{{ formData.free_minutes }}分钟
                   <br />
-                  - 计费时长：{{ Math.max(0, 135 - formData.free_minutes) }}分钟
+                  - 计费时长：{{ Math.max(0, (estimateMinutes || 0) - formData.free_minutes) }}分钟
                   <br />
-                  - 应收费用：约 ¥{{ calculateExample() }}
+                  - 应收费用：
+                  <n-spin :show="estimating" :size="12" style="display: inline-block">
+                    <n-text type="primary" strong>¥{{ estimateFeeResult }}</n-text>
+                  </n-spin>
                 </n-text>
               </n-space>
             </n-card>
@@ -138,9 +151,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useMessage } from 'naive-ui';
-import { getFeeRule, updateFeeRule } from '@/api/http.js';
+import { getFeeRule, updateFeeRule, estimateFee } from '@/api/http.js';
 
 const message = useMessage();
 const formRef = ref();
@@ -157,6 +170,12 @@ const formData = ref({
 
 // 保存初始数据用于重置
 const initialData = ref({});
+
+// 试算相关
+const estimateMinutes = ref(135);
+const estimateFeeResult = ref('0.00');
+const estimating = ref(false);
+let estimateTimer: any = null;
 
 // 表单验证规则
 const rules = {
@@ -185,31 +204,52 @@ const rules = {
   },
 };
 
-// 计算示例费用
-const calculateExample = () => {
-  const totalMinutes = 135; // 2小时15分钟
-  const chargeableMinutes = Math.max(0, totalMinutes - formData.value.free_minutes);
-
-  if (chargeableMinutes === 0) return 0;
-
-  let hours = 0;
-  if (formData.value.rounding === '30min_up') {
-    // 30分钟进位
-    hours = Math.ceil(chargeableMinutes / 30) * 0.5;
-  } else {
-    // 60分钟进位
-    hours = Math.ceil(chargeableMinutes / 60);
+// 调用后端试算接口实时计算费用
+const fetchEstimateFee = async () => {
+  if (estimateMinutes.value === null || estimateMinutes.value === undefined) {
+    estimateFeeResult.value = '0.00';
+    return;
   }
-
-  let fee = hours * formData.value.price_per_hour;
-
-  // 日封顶
-  if (formData.value.daily_cap > 0) {
-    fee = Math.min(fee, formData.value.daily_cap);
+  estimating.value = true;
+  try {
+    const res = await estimateFee({
+      minutes: estimateMinutes.value,
+      free_minutes: formData.value.free_minutes,
+      price_per_hour: formData.value.price_per_hour,
+      daily_cap: formData.value.daily_cap,
+      rounding: formData.value.rounding,
+    });
+    if (res && res.data) {
+      estimateFeeResult.value = Number(res.data.fee).toFixed(2);
+    }
+  } catch (error) {
+    estimateFeeResult.value = '0.00';
+  } finally {
+    estimating.value = false;
   }
-
-  return fee.toFixed(2);
 };
+
+// 防抖触发试算
+const triggerEstimate = () => {
+  if (estimateTimer) clearTimeout(estimateTimer);
+  estimateTimer = setTimeout(() => {
+    fetchEstimateFee();
+  }, 300);
+};
+
+// 监听分钟数及规则变化，实时调用后端接口
+watch(
+  [
+    estimateMinutes,
+    () => formData.value.free_minutes,
+    () => formData.value.price_per_hour,
+    () => formData.value.daily_cap,
+    () => formData.value.rounding,
+  ],
+  () => {
+    triggerEstimate();
+  }
+);
 
 // 加载收费规则
 const loadFeeRule = async () => {
@@ -228,6 +268,8 @@ const loadFeeRule = async () => {
     message.error('加载收费规则失败');
   } finally {
     loading.value = false;
+    // 加载完成后初始化试算结果
+    fetchEstimateFee();
   }
 };
 
