@@ -184,6 +184,15 @@ export const updateFeeRule = (data) => {
   return http.post('/fee-rule', data);
 };
 
+/**
+ * 试算停车费用
+ * @param {Object} data - { minutes, free_minutes?, price_per_hour?, daily_cap?, rounding? }
+ * @returns {Promise}
+ */
+export const estimateFee = (data) => {
+  return http.post('/fee-rule/estimate', data);
+};
+
 // ==================== 进出场记录 API ====================
 
 /**
