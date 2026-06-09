@@ -184,6 +184,10 @@ export const updateFeeRule = (data) => {
   return http.post('/fee-rule', data);
 };
 
+export const calculateFeePreview = (data) => {
+  return http.post('/fee-rule/calculate', data);
+};
+
 // ==================== 进出场记录 API ====================
 
 /**

@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { sendResponse, sendError, getClientIp } = require('../utils/helpers');
+const { calculateFee } = require('../services/feeCalculator');
 
 /**
  * 获取收费规则
@@ -77,7 +78,39 @@ async function updateFeeRule(req, res) {
   }
 }
 
+async function calculateFeePreview(req, res) {
+  try {
+    const { total_minutes, free_minutes, price_per_hour, daily_cap, rounding } = req.body;
+
+    if (total_minutes === undefined || total_minutes < 0) {
+      return sendError(res, '停车分钟数无效', 400);
+    }
+
+    const rule = {
+      free_minutes: free_minutes !== undefined ? Number(free_minutes) : 15,
+      price_per_hour: price_per_hour !== undefined ? Number(price_per_hour) : 5.0,
+      daily_cap: daily_cap !== undefined ? Number(daily_cap) : 50.0,
+      rounding: rounding || '60min_up',
+    };
+
+    const fee = calculateFee(Number(total_minutes), rule);
+
+    const chargeableMinutes = Math.max(0, Number(total_minutes) - rule.free_minutes);
+
+    sendResponse(res, 0, 'success', {
+      total_minutes: Number(total_minutes),
+      free_minutes: rule.free_minutes,
+      chargeable_minutes: chargeableMinutes,
+      fee,
+    });
+  } catch (error) {
+    console.error('试算错误:', error);
+    sendError(res, '试算失败', 500);
+  }
+}
+
 module.exports = {
   getFeeRule,
   updateFeeRule,
+  calculateFeePreview,
 };
